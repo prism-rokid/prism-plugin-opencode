@@ -35,6 +35,7 @@ type Client interface {
 	SwitchSessionModel(ctx context.Context, id string, model opencode.ModelRef) error
 	ListMessages(ctx context.Context, sessionID string) ([]opencode.Message, error)
 	Prompt(ctx context.Context, sessionID, text string) error
+	PromptWithParts(ctx context.Context, sessionID string, parts []opencode.InputPart) error
 	Abort(ctx context.Context, sessionID string) error
 	GetConfig(ctx context.Context) (*opencode.Config, error)
 	PatchConfig(ctx context.Context, patch opencode.PatchConfigRequest) (*opencode.Config, error)

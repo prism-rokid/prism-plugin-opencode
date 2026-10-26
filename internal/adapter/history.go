@@ -257,7 +257,32 @@ func historyMessage(message opencode.Message) pluginbridge.HistoryMessage {
 	if len(metadata) > 0 {
 		historyMessage.Metadata = metadata
 	}
+	if attachments := historyAttachments(message); len(attachments) > 0 {
+		if historyMessage.Metadata == nil {
+			historyMessage.Metadata = map[string]any{}
+		}
+		historyMessage.Metadata["attachments"] = attachments
+	}
 	return historyMessage
+}
+
+// historyAttachments lists a message's file parts as lightweight metadata:
+// name, mime type and kind only — remote clients must never receive the
+// data URL or the binary.
+func historyAttachments(message opencode.Message) []map[string]any {
+	attachments := make([]map[string]any, 0)
+	for _, part := range message.Parts {
+		if part.Type != "file" {
+			continue
+		}
+		name := firstNonEmpty(rawString(part.Raw, "filename"), "file")
+		attachments = append(attachments, map[string]any{
+			"name":      name,
+			"mime_type": rawString(part.Raw, "mime"),
+			"kind":      "file",
+		})
+	}
+	return attachments
 }
 
 // historyProgressSteps maps tool parts to structured progress steps. Part

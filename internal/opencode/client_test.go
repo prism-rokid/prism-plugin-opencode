@@ -420,6 +420,41 @@ func TestPrompt(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+	t.Run("with parts carries file parts verbatim", func(t *testing.T) {
+		_, client := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode: %v", err)
+			}
+			want := map[string]any{
+				"parts": []any{
+					map[string]any{"type": "text", "text": "look"},
+					map[string]any{"type": "file", "mime": "image/png", "filename": "shot.png", "url": "data:image/png;base64,aGk="},
+				},
+			}
+			got, _ := json.Marshal(body)
+			wantJSON, _ := json.Marshal(want)
+			if string(got) != string(wantJSON) {
+				t.Errorf("body = %s, want %s", got, wantJSON)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+		parts := []InputPart{
+			TextInput("look"),
+			FileInput("image/png", "shot.png", "data:image/png;base64,aGk="),
+		}
+		if err := client.PromptWithParts(context.Background(), "ses_x", parts); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("empty parts rejected", func(t *testing.T) {
+		_, client := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+			t.Error("server must not be called with zero parts")
+		})
+		if err := client.PromptWithParts(context.Background(), "ses_x", nil); err == nil || !strings.Contains(err.Error(), "at least one part") {
+			t.Fatalf("err = %v", err)
+		}
+	})
 }
 
 func TestAbort(t *testing.T) {

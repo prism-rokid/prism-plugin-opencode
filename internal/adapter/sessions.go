@@ -90,9 +90,6 @@ func (a *Adapter) StartSessionWithMessage(ctx context.Context, req pluginbridge.
 	if text == "" {
 		return pluginbridge.StartSessionWithMessageResult{}, fmt.Errorf("opencode: first message text required")
 	}
-	if len(req.Message.Attachments) > 0 {
-		return pluginbridge.StartSessionWithMessageResult{}, fmt.Errorf("opencode: attachments are not supported by the opencode adapter")
-	}
 	create := opencode.CreateSessionRequest{}
 	if cwd := strings.TrimSpace(req.Cwd); cwd != "" {
 		create.Directory = cwd

@@ -44,6 +44,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -379,13 +380,88 @@ func main() {
 	})
 	logf("      observed event types: %s", strings.Join(eventTypes, ", "))
 
+	// Step 8.5: send a message carrying an attachment. The adapter must inline
+	// the hub-materialized local file as an opencode file part (data URL).
+	attachmentPath := filepath.Join(os.TempDir(), fmt.Sprintf("prism-conformance-att-%d.png", time.Now().UnixNano()))
+	if err := os.WriteFile(attachmentPath, []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0o600); err != nil {
+		logf("FATAL: write attachment fixture: %v", err)
+		d.shutdown()
+		os.Exit(1)
+	}
+	stepFloat(8.5, "adapter.send with attachment", func() error {
+		payload, err := d.call("adapter.send", map[string]any{
+			"session": nativeSession,
+			"message": map[string]any{
+				"prism_message_id": "conformance-msg-2",
+				"text":             "describe this image",
+				"source_device":    "conformance-driver",
+				"attachments": []map[string]any{{
+					"name":       "att.png",
+					"mime_type":  "image/png",
+					"local_path": attachmentPath,
+				}},
+			},
+		}, 15*time.Second)
+		if err != nil {
+			return err
+		}
+		receipt := asObject(payload)
+		if receipt == nil || receipt["accepted"] != true {
+			return fmt.Errorf("attachment send not accepted: %s", trunc(string(payload)))
+		}
+		if detail := strOr(receipt["detail"], ""); !strings.Contains(detail, "1 attachment") {
+			return fmt.Errorf("attachment receipt detail = %q, want it to mention the attachment", detail)
+		}
+		return nil
+	})
+
+	// Step 8.6: the attachment turn's run must finish normally.
+	stepFloat(8.6, "waitForRun (attachment turn)", func() error {
+		payload, err := d.call("adapter.waitForRun", map[string]any{"session": nativeSession}, 25*time.Second)
+		if err != nil {
+			return err
+		}
+		ev := asObject(payload)
+		if strOr(ev["type"], "?") != "run.completed" {
+			return fmt.Errorf("attachment turn terminal type=%s, want run.completed", strOr(ev["type"], "?"))
+		}
+		return nil
+	})
+
+	// Step 8.7: readHistoryStream must expose the attachment as lightweight
+	// metadata on the user message (name/mime/kind, never a data URL).
+	stepFloat(8.7, "readHistoryStream exposes attachment metadata", func() error {
+		if _, err := d.call("adapter.readHistoryStream", map[string]any{
+			"session": nativeSession,
+			"request": map[string]any{"limit": 5},
+		}, 10*time.Second); err != nil {
+			return err
+		}
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			if name, ok := d.latestHistoryAttachmentName(); ok {
+				if name != "att.png" {
+					return fmt.Errorf("history attachment name = %q, want att.png", name)
+				}
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("no history.stream turn carried attachment metadata within 15s")
+			}
+			select {
+			case <-d.eventReady:
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	})
+
 	// Step 9: close.
 	step(9, "adapter.close", func() error {
 		_, err := d.call("adapter.close", nil, 10*time.Second)
 		return err
 	})
 
-	fmt.Println("CONFORMANCE PASS: probe/discover/listSessions/select/subscribe/send/events/waitForRun/close all OK")
+	fmt.Println("CONFORMANCE PASS: probe/discover/listSessions/select/subscribe/send/events/waitForRun/attachments/close all OK")
 	d.shutdown()
 	os.Exit(0)
 }
@@ -563,6 +639,52 @@ func step(n int, name string, fn func() error) {
 		os.Exit(1)
 	}
 	fmt.Printf("        ok\n")
+}
+
+// stepFloat is step() for fractional step numbers (inserted steps).
+func stepFloat(n float64, name string, fn func() error) {
+	logf("[step %.1f] %s", n, name)
+	if err := fn(); err != nil {
+		fmt.Printf("CONFORMANCE FAIL: step %.1f (%s): %v\n", n, name, err)
+		os.Exit(1)
+	}
+	fmt.Printf("        ok\n")
+}
+
+// latestHistoryAttachmentName scans received history.stream payloads for the
+// most recent user message carrying attachments metadata and returns the
+// first attachment name. History frames land in d.events without a
+// subscription id, unlike plugin.event frames.
+func (d *driver) latestHistoryAttachmentName() (string, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i := len(d.events) - 1; i >= 0; i-- {
+		if d.events[i].SubscriptionID != "" {
+			continue // plugin.event frame, not history.stream
+		}
+		var streamEvent struct {
+			Type string `json:"type"`
+			Turn *struct {
+				Messages []struct {
+					Role     string `json:"role"`
+					Metadata struct {
+						Attachments []struct {
+							Name string `json:"name"`
+						} `json:"attachments"`
+					} `json:"metadata"`
+				} `json:"messages"`
+			} `json:"turn"`
+		}
+		if err := json.Unmarshal(d.events[i].Raw, &streamEvent); err != nil || streamEvent.Turn == nil {
+			continue
+		}
+		for _, msg := range streamEvent.Turn.Messages {
+			if msg.Role == "user" && len(msg.Metadata.Attachments) > 0 {
+				return msg.Metadata.Attachments[0].Name, true
+			}
+		}
+	}
+	return "", false
 }
 
 // ---------------------------------------------------------------------------

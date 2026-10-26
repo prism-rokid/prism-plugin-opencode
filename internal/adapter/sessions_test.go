@@ -111,8 +111,11 @@ func TestStartSessionWithMessage(t *testing.T) {
 				}
 				return &opencode.Session{ID: "ses_new", Directory: "/work"}, nil
 			},
-			prompt: func(_ context.Context, sessionID, text string) error {
-				prompted.sessionID, prompted.text = sessionID, text
+			promptWithParts: func(_ context.Context, sessionID string, parts []opencode.InputPart) error {
+				prompted.sessionID = sessionID
+				if len(parts) == 1 {
+					prompted.text = parts[0].Text
+				}
 				return nil
 			},
 			listMessages: func(context.Context, string) ([]opencode.Message, error) {
@@ -146,14 +149,18 @@ func TestStartSessionWithMessage(t *testing.T) {
 	}
 }
 
-func TestStartSessionWithMessageRejectsAttachmentsAndEmptyText(t *testing.T) {
-	adapter := testAdapter(&mockClient{})
+func TestStartSessionWithMessageRejectsBadAttachmentsAndEmptyText(t *testing.T) {
+	adapter := testAdapter(&mockClient{
+		createSession: func(context.Context, opencode.CreateSessionRequest) (*opencode.Session, error) {
+			return &opencode.Session{ID: "ses_new"}, nil
+		},
+	})
 	if _, err := adapter.StartSessionWithMessage(context.Background(), pluginbridge.StartSessionWithMessageRequest{
 		Message: pluginbridge.InboundMessage{
 			Text:        "hi",
-			Attachments: []pluginbridge.Attachment{{Name: "a.png", LocalPath: "/tmp/a.png"}},
+			Attachments: []pluginbridge.Attachment{{Name: "a.png", LocalPath: "/nonexistent/a.png"}},
 		},
-	}); err == nil || !strings.Contains(err.Error(), "attachments") {
+	}); err == nil || !strings.Contains(err.Error(), "read file") {
 		t.Fatalf("attachments error = %v", err)
 	}
 	if _, err := adapter.StartSessionWithMessage(context.Background(), pluginbridge.StartSessionWithMessageRequest{

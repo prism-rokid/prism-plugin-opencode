@@ -12,20 +12,21 @@ import (
 // a stub fail loudly ("mock: X not stubbed") so a test never silently passes
 // through an unintended code path.
 type mockClient struct {
-	listSessions  func(ctx context.Context) ([]opencode.Session, error)
-	getSession    func(ctx context.Context, id string) (*opencode.Session, error)
-	createSession func(ctx context.Context, req opencode.CreateSessionRequest) (*opencode.Session, error)
-	patchSession  func(ctx context.Context, id string, patch opencode.PatchSessionRequest) (*opencode.Session, error)
-	deleteSession func(ctx context.Context, id string) error
-	switchModel   func(ctx context.Context, id string, model opencode.ModelRef) error
-	listMessages  func(ctx context.Context, sessionID string) ([]opencode.Message, error)
-	prompt        func(ctx context.Context, sessionID, text string) error
-	abort         func(ctx context.Context, sessionID string) error
-	getConfig     func(ctx context.Context) (*opencode.Config, error)
-	patchConfig   func(ctx context.Context, patch opencode.PatchConfigRequest) (*opencode.Config, error)
-	listAgents    func(ctx context.Context) ([]opencode.Agent, error)
-	listModels    func(ctx context.Context) ([]opencode.ModelInfo, error)
-	streamEvents  func(ctx context.Context, fn func(opencode.Event) error) error
+	listSessions    func(ctx context.Context) ([]opencode.Session, error)
+	getSession      func(ctx context.Context, id string) (*opencode.Session, error)
+	createSession   func(ctx context.Context, req opencode.CreateSessionRequest) (*opencode.Session, error)
+	patchSession    func(ctx context.Context, id string, patch opencode.PatchSessionRequest) (*opencode.Session, error)
+	deleteSession   func(ctx context.Context, id string) error
+	switchModel     func(ctx context.Context, id string, model opencode.ModelRef) error
+	listMessages    func(ctx context.Context, sessionID string) ([]opencode.Message, error)
+	prompt          func(ctx context.Context, sessionID, text string) error
+	promptWithParts func(ctx context.Context, sessionID string, parts []opencode.InputPart) error
+	abort           func(ctx context.Context, sessionID string) error
+	getConfig       func(ctx context.Context) (*opencode.Config, error)
+	patchConfig     func(ctx context.Context, patch opencode.PatchConfigRequest) (*opencode.Config, error)
+	listAgents      func(ctx context.Context) ([]opencode.Agent, error)
+	listModels      func(ctx context.Context) ([]opencode.ModelInfo, error)
+	streamEvents    func(ctx context.Context, fn func(opencode.Event) error) error
 }
 
 var _ Client = (*mockClient)(nil)
@@ -97,6 +98,13 @@ func (m *mockClient) Prompt(ctx context.Context, sessionID, text string) error {
 		return errNotStubbed("Prompt")
 	}
 	return m.prompt(ctx, sessionID, text)
+}
+
+func (m *mockClient) PromptWithParts(ctx context.Context, sessionID string, parts []opencode.InputPart) error {
+	if m.promptWithParts == nil {
+		return errNotStubbed("PromptWithParts")
+	}
+	return m.promptWithParts(ctx, sessionID, parts)
 }
 
 func (m *mockClient) Abort(ctx context.Context, sessionID string) error {

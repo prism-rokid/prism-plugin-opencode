@@ -371,7 +371,17 @@ func (c *Client) ListMessages(ctx context.Context, sessionID string) ([]Message,
 // Prompt submits user text fire-and-forget (POST /session/:id/prompt_async,
 // expect 204). Streaming arrives via StreamEvents ("message.updated" …).
 func (c *Client) Prompt(ctx context.Context, sessionID, text string) error {
-	body := promptAsyncRequest{Parts: []promptPart{{Type: "text", Text: text}}}
+	return c.PromptWithParts(ctx, sessionID, []InputPart{TextInput(text)})
+}
+
+// PromptWithParts submits a prompt built from arbitrary parts (text plus
+// file parts carrying images or other attachments). At least one part is
+// required by the API.
+func (c *Client) PromptWithParts(ctx context.Context, sessionID string, parts []InputPart) error {
+	if len(parts) == 0 {
+		return errors.New("opencode: prompt requires at least one part")
+	}
+	body := promptAsyncRequest{Parts: parts}
 	return c.doJSON(ctx, "POST", "/session/"+url.PathEscape(sessionID)+"/prompt_async", nil, body, nil)
 }
 
@@ -494,10 +504,25 @@ func extraFields(b []byte, modeled ...string) map[string]any {
 
 // promptAsyncRequest is the body of POST /session/:id/prompt_async.
 type promptAsyncRequest struct {
-	Parts []promptPart `json:"parts"`
+	Parts []InputPart `json:"parts"`
 }
 
-type promptPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+// InputPart is one part of a submitted prompt. Text parts carry Text; file
+// parts (images, PDFs…) carry Mime, optional Filename and URL. The form the
+// opencode clients themselves use for images is a data: URL — verified
+// against parts persisted by opencode 1.19.4.
+type InputPart struct {
+	Type     string `json:"type"` // "text" | "file"
+	Text     string `json:"text,omitempty"`
+	Mime     string `json:"mime,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	URL      string `json:"url,omitempty"`
+}
+
+// TextInput builds a text part.
+func TextInput(text string) InputPart { return InputPart{Type: "text", Text: text} }
+
+// FileInput builds a file part (mime is required by the API).
+func FileInput(mime, filename, url string) InputPart {
+	return InputPart{Type: "file", Mime: mime, Filename: filename, URL: url}
 }

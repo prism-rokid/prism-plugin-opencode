@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -280,5 +281,30 @@ func assertNoHistoryEvent(t *testing.T, out <-chan pluginbridge.HistoryStreamEve
 			t.Fatalf("unexpected history event: %+v", event)
 		}
 	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestHistoryMessageExposesAttachmentMetadataOnly(t *testing.T) {
+	msg := userMessage("msg_att", "look at this", 1000)
+	msg.Parts = append(msg.Parts, opencode.MessagePart{
+		Type: "file",
+		Raw: map[string]any{
+			"mime":     "image/png",
+			"filename": "shot.png",
+			"url":      "data:image/png;base64,VERYLONG",
+		},
+	})
+	hm := historyMessage(msg)
+	attachments, ok := hm.Metadata["attachments"].([]map[string]any)
+	if !ok || len(attachments) != 1 {
+		t.Fatalf("attachments metadata = %#v", hm.Metadata["attachments"])
+	}
+	att := attachments[0]
+	if att["name"] != "shot.png" || att["mime_type"] != "image/png" || att["kind"] != "file" {
+		t.Fatalf("attachment entry = %#v", att)
+	}
+	encoded, _ := json.Marshal(hm.Metadata)
+	if strings.Contains(string(encoded), "data:image") {
+		t.Fatalf("metadata must not leak the data URL: %s", encoded)
 	}
 }

@@ -77,6 +77,9 @@ type part struct {
 	MessageID string `json:"messageID,omitempty"`
 	Type      string `json:"type"`
 	Text      string `json:"text,omitempty"`
+	Mime      string `json:"mime,omitempty"`
+	Filename  string `json:"filename,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 // messageInfo is the bare message object the real API carries inside SSE
@@ -108,12 +111,16 @@ type message struct {
 }
 
 // promptRequest is the body of POST /session/:id/prompt_async. The real v1
-// shape is {"parts":[{"type":"text","text":"..."}]}; a bare "text" field is
-// tolerated for manual curling.
+// shape is {"parts":[{"type":"text","text":"..."} |
+// {"type":"file","mime":"image/png","filename":"...","url":"data:..."}]}; a
+// bare "text" field is tolerated for manual curling.
 type promptRequest struct {
 	Parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		Mime     string `json:"mime"`
+		Filename string `json:"filename"`
+		URL      string `json:"url"`
 	} `json:"parts"`
 	Text string `json:"text"`
 }
@@ -129,6 +136,16 @@ func (r promptRequest) text() string {
 		}
 	}
 	return ""
+}
+
+// hasFileParts reports whether any submitted part is a file attachment.
+func (r promptRequest) hasFileParts() bool {
+	for _, p := range r.Parts {
+		if p.Type == "file" {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +407,7 @@ func (s *fakeServer) handlePromptAsync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	text := req.text()
-	if text == "" {
+	if text == "" && !req.hasFileParts() {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "text required"})
 		return
 	}
@@ -410,15 +427,26 @@ func (s *fakeServer) handlePromptAsync(w http.ResponseWriter, r *http.Request) {
 	}
 	ts := now()
 	userID := s.uid("msg")
+	userParts := []part{}
+	if text != "" {
+		userParts = append(userParts, part{ID: s.uid("prt"), SessionID: id, MessageID: userID, Type: "text", Text: text})
+	}
+	for _, p := range req.Parts {
+		if p.Type != "file" {
+			continue
+		}
+		userParts = append(userParts, part{
+			ID: s.uid("prt"), SessionID: id, MessageID: userID, Type: "file",
+			Mime: p.Mime, Filename: p.Filename, URL: p.URL,
+		})
+	}
 	userMsg := message{
 		Info: messageInfo{
 			ID: userID, SessionID: id, Role: "user",
 			Time:  timeObj{Created: ts, Updated: ts},
 			Model: &modelRef{ProviderID: providerID, ModelID: modelID},
 		},
-		Parts: []part{
-			{ID: s.uid("prt"), SessionID: id, MessageID: userID, Type: "text", Text: text},
-		},
+		Parts: userParts,
 	}
 	assistantID := s.uid("msg")
 	s.messages[id] = append(s.messages[id], userMsg)
@@ -445,7 +473,14 @@ func (s *fakeServer) simulateRun(sessionID string, run *activeRun, userMsg messa
 	if delay <= 0 {
 		delay = 400 * time.Millisecond
 	}
-	reply := "fake reply to: " + userMsg.Parts[0].Text
+	replyText := "attachment"
+	for _, p := range userMsg.Parts {
+		if p.Type == "text" && strings.TrimSpace(p.Text) != "" {
+			replyText = p.Text
+			break
+		}
+	}
+	reply := "fake reply to: " + replyText
 	partial := reply
 	if len(partial) > 8 {
 		partial = partial[:len(partial)/2]

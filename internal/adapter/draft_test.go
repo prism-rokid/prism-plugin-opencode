@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -23,7 +24,13 @@ func TestDraftCreatesOnlyOnStartAndPreservesModelAndDirectory(t *testing.T) {
 			created = req
 			return &opencode.Session{ID: "ses_draft", Directory: req.Directory}, nil
 		},
-		prompt: func(context.Context, string, string) error { sends++; return nil },
+		promptWithParts: func(_ context.Context, _ string, parts []opencode.InputPart) error {
+			if len(parts) != 1 || parts[0].Text == "" {
+				return errors.New("draft prompt must be text-only")
+			}
+			sends++
+			return nil
+		},
 		listMessages: func(context.Context, string) ([]opencode.Message, error) {
 			return []opencode.Message{userMessage("msg_1", "draft first message", 1)}, nil
 		},
