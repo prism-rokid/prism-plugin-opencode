@@ -1,0 +1,44 @@
+id: opencode
+schema_version: 1
+display_name: OpenCode
+icon_url: https://registry.npmmirror.com/@lobehub/icons-static-avatar/latest/files/avatars/opencode.webp
+icon_svg_url: https://registry.npmmirror.com/@lobehub/icons-static-svg/latest/files/icons/opencode.svg
+description: Connects Prism to a locally running opencode server (opencode serve, or the server embedded in the opencode TUI/desktop app) over its native HTTP + SSE protocol, with session listing, history reads, prompt delivery, interrupt, and model control.
+version: 0.1.1
+plugin_protocol_version: "4"
+min_hub_version: 0.1.0
+integration_mode: protocol-native
+transport: process
+runtime_modes: [native]
+default_runtime_mode: native
+# Hub-defined launch declaration (prism-hub docs/13 §2.1, internal/plugin/manifest.go).
+# NOTE: this field is understood by Prism Hub but is still missing from
+# ../prism-plugin-sdk/conformance/manifest.schema.json (stale schema); every
+# sibling protocol-native plugin (openclaw, hermes, codex) carries it too.
+# conformance/validate_manifest accepts it via -allow-extra managed_launch_specs.
+managed_launch_specs:
+  - kind: service
+    start: ["opencode", "serve", "--port", "4096"]
+    ready: probe
+    ready_timeout_ms: 60000
+runtime_controls:
+  native:
+    model: stable # model switch via POST /api/session/:id/model
+runtime_operations:
+  native:
+    rename: direct # PATCH /session/:id (title)
+    delete: direct # DELETE /session/:id
+    pin: unsupported
+    archive: unsupported
+command: ["./bin/prism-plugin-opencode"]
+capabilities:
+  can_list_sessions: true
+  can_read_history: true
+  can_interrupt: true
+  can_wait_run: true
+  can_control_session: true
+  can_attach_session: true
+  can_start_session_with_message: true
+  can_open_draft: true
+  can_forward_sync: true
+  can_reverse_sync: true

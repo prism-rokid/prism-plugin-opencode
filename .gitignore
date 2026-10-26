@@ -1,0 +1,13 @@
+# Built plugin binary (manifest command target)
+/bin/
+/release/
+
+# Conformance scratch builds (run.sh uses mktemp -d, but keep stray ones out)
+/conformance/bin/
+
+# Go test artifacts
+*.test
+coverage.out
+
+# OS noise
+.DS_Store
