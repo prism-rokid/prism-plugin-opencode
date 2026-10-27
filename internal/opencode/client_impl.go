@@ -66,13 +66,21 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		body = bytes.NewReader(encoded)
 	}
 	endpoint := c.endpoint(path)
-	if directory := directoryFromContext(ctx); directory != "" && query.Get("directory") == "" {
+	if directory := directoryFromContext(ctx); directory != "" && !strings.HasPrefix(path, "/api/") && query.Get("directory") == "" {
 		scoped := make(url.Values, len(query)+1)
 		for key, values := range query {
 			scoped[key] = values
 		}
 		query = scoped
 		query.Set("directory", directory)
+	}
+	if strings.HasPrefix(path, "/api/") && (path == "/api/model" || path == "/api/model/default" || path == "/api/agent" || path == "/api/config") {
+		if directory := directoryFromContext(ctx); directory != "" {
+			if query == nil {
+				query = url.Values{}
+			}
+			query.Set("location[directory]", directory)
+		}
 	}
 	if len(query) > 0 {
 		endpoint += "?" + query.Encode()
@@ -150,8 +158,16 @@ func (c *Client) responseError(method, path string, resp *http.Response) error {
 // connectSSE opens the GET /event stream. It is separate from doJSON because
 // the body is streamed, not buffered.
 func (c *Client) connectSSE(ctx context.Context) (*http.Response, error) {
-	endpoint := c.endpoint("/event")
-	if directory := directoryFromContext(ctx); directory != "" {
+	v2, err := c.isV2(ctx)
+	if err != nil {
+		return nil, err
+	}
+	path := "/event"
+	if v2 {
+		path = "/api/event"
+	}
+	endpoint := c.endpoint(path)
+	if directory := directoryFromContext(ctx); directory != "" && !v2 {
 		endpoint += "?" + url.Values{"directory": {directory}}.Encode()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)

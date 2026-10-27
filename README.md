@@ -5,6 +5,7 @@
 - **集成模式**：`protocol-native`（直连 opencode server 的 HTTP + SSE 协议，不做桌面自动化）
 - **插件协议**：PluginBridge `v4`（`PRISM_PLUGIN_PROTOCOL_VERSION=4`）
 - **传输**：Hub 以子进程方式拉起适配器，`stdio` 上跑换行分隔的 JSON-RPC
+- **OpenCode 兼容性**：自动识别 V1/V2；真实服务验证版本为 `1.19.4` 和 `2.2.0`。迁移方案与验证范围见 [V2 适配说明](docs/V2-MIGRATION.md)。
 
 ## 架构
 
@@ -14,10 +15,10 @@ Prism Hub (TUI / 桌面 / 远程客户端)
    ▼
 prism-plugin-opencode 适配器  (cmd/opencode-adapter → ./bin/prism-plugin-opencode)
    │  internal/adapter  →  internal/opencode (唯一使用 net/http 的包)
-   │  HTTP (JSON) + SSE (GET /event)
+   │  HTTP (JSON) + SSE (V1 /event，V2 /api/event)
    ▼
 opencode server   （`opencode serve --port 4096`，或 TUI/桌面内嵌的随机端口实例；
-                    `OPENCODE_SERVER_PASSWORD` 启用 basic auth，用户名 opencode）
+                    `OPENCODE_PASSWORD` / `OPENCODE_SERVER_PASSWORD` 启用 basic auth，用户名 opencode）
 ```
 
 - TUI 与桌面共用同一条链路：Hub 不感知 opencode，只看到 PluginBridge 会话。
@@ -140,7 +141,7 @@ tag 或 Release 资产，也不要在仓库或 Actions 中配置 OSS、Registry 
 | 原生实现 | Go 单二进制 | Go 单二进制 | TypeScript（`${runtime.node}`） |
 | 事件订阅 | 每会话 `subscribe`（SSE 总线） | plugin-wide watch + approval | 桌面前台 watcher |
 | 能力面 | 核心集：list/read-history/interrupt/wait-run/control/attach/start-with-message/双向同步（见 manifest） | 全家桶（approval、plugin-wide watch、read status 等） | 仅 `native_visible_input` + forward sync |
-| server 发现 | `--server-url` / 4096 / TUI 实例端口文件 | `OPENCLAW_GATEWAY_URL` / auto | 桌面进程 |
+| server 发现 | `--server-url` / V2 service.json / 4096 / V1 实例文件 | `OPENCLAW_GATEWAY_URL` / auto | 桌面进程 |
 
 ## Manifest 备注
 

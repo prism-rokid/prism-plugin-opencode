@@ -93,12 +93,12 @@ func (a *Adapter) runHistoryStream(ctx context.Context, run historyRun) {
 	// opencode 1.19+; busy transitions reload to no change and are diffed away.
 	err = a.client.StreamEvents(ctx, func(ev opencode.Event) error {
 		switch ev.Type {
-		case "message.updated", "message.part.updated", "message.removed", "session.idle", "session.status":
+		case "server.connected", "message.updated", "message.part.updated", "message.removed", "session.idle", "session.status", "session.text.delta", "session.text.ended", "session.step.started", "session.step.ended", "session.tool.called", "session.tool.success", "session.tool.failed", "session.inbox.enqueued", "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted":
 		default:
 			return nil
 		}
 		props := eventProperties(ev)
-		if !eventMatchesSession(props, run.sessionID) {
+		if ev.Type != "server.connected" && !eventMatchesSession(props, run.sessionID) {
 			return nil
 		}
 		latest, err := a.loadHistoryTurns(ctx, run.sessionID, run.limit)
@@ -233,7 +233,7 @@ func historyMessage(message opencode.Message) pluginbridge.HistoryMessage {
 		data, _ := failure["data"].(map[string]any)
 		historyMessage.Status = "failed"
 		if historyMessage.Content == "" {
-			historyMessage.Content = "OpenCode 运行失败：" + firstNonEmpty(propString(data, "message"), propString(failure, "name"))
+			historyMessage.Content = "OpenCode 运行失败：" + firstNonEmpty(propString(data, "message"), propString(failure, "message"), propString(failure, "name", "type"))
 		}
 	}
 	if steps := historyProgressSteps(message, createdAt); len(steps) > 0 {

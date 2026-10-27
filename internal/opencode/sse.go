@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ const sseMaxLineSize = 1 << 20
 // "server.connected" event. ctx cancellation unwinds everything.
 func (c *Client) streamEvents(ctx context.Context, fn func(Event) error) error {
 	backoff := sseBackoffStart
+	textParts := map[string]string{}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -45,7 +47,38 @@ func (c *Client) streamEvents(ctx context.Context, fn func(Event) error) error {
 		}
 
 		backoff = sseBackoffStart // connection established: reset the ladder
-		stopped, err := scanEvents(ctx, resp.Body, fn)
+		stopped, err := scanEvents(ctx, resp.Body, func(ev Event) error {
+			if d := directoryFromContext(ctx); d != "" && ev.Location.Directory != "" && ev.Location.Directory != d {
+				return nil
+			}
+			if ev.Type == "server.connected" {
+				clear(textParts)
+			}
+			if ev.Type == "session.text.delta" || ev.Type == "session.text.ended" {
+				var p struct {
+					SessionID string `json:"sessionID"`
+					MessageID string `json:"assistantMessageID"`
+					Ordinal   int    `json:"ordinal"`
+					Delta     string `json:"delta"`
+					Text      string `json:"text"`
+				}
+				if err := json.Unmarshal(ev.Properties, &p); err != nil {
+					return nil
+				}
+				key := p.SessionID + ":" + p.MessageID + ":" + fmt.Sprint(p.Ordinal)
+				text := p.Text
+				if ev.Type == "session.text.delta" {
+					text = textParts[key] + p.Delta
+					textParts[key] = text
+				} else {
+					delete(textParts, key)
+				}
+				props, _ := json.Marshal(map[string]any{"sessionID": p.SessionID, "messageID": p.MessageID, "part": map[string]any{"id": key, "messageID": p.MessageID, "type": "text", "text": text}})
+				ev.Type = "message.part.updated"
+				ev.Properties = props
+			}
+			return fn(ev)
+		})
 		if stopped {
 			return err
 		}
@@ -78,7 +111,13 @@ func scanEvents(ctx context.Context, body io.ReadCloser, fn func(Event) error) (
 		payload := strings.Join(dataLines, "\n")
 		dataLines = dataLines[:0]
 		var event Event
-		if jsonErr := json.Unmarshal([]byte(payload), &event); jsonErr != nil {
+		// Effect's V2 SSE encoder transports V2EventEncoded as a JSON string.
+		raw := []byte(payload)
+		var encoded string
+		if json.Unmarshal(raw, &encoded) == nil {
+			raw = []byte(encoded)
+		}
+		if jsonErr := json.Unmarshal(raw, &event); jsonErr != nil {
 			return true, nil // ignore malformed frames, keep streaming
 		}
 		if event.Type == "" {

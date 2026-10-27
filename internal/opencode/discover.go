@@ -32,7 +32,7 @@ const probeTimeout = 1500 * time.Millisecond
 // future versions or third-party launchers that do publish a port are picked
 // up, but stock installs rely on the explicit URL or port 4096.
 func discover(ctx context.Context, opts DiscoverOptions) (*ServerInfo, error) {
-	password := os.Getenv("OPENCODE_SERVER_PASSWORD")
+	password := ServerPassword()
 
 	candidates := []string{}
 	addCandidate := func(raws ...string) {
@@ -57,6 +57,10 @@ func discover(ctx context.Context, opts DiscoverOptions) (*ServerInfo, error) {
 	if opts.ExplicitURL != "" {
 		addCandidate(opts.ExplicitURL)
 	}
+	registered := registeredService(opts.StateDir)
+	if registered != nil {
+		addCandidate(registered.BaseURL)
+	}
 	addCandidate(fmt.Sprintf("http://127.0.0.1:%d", defaultServerPort))
 	addCandidate(dataDirCandidates(opts.DataDir)...)
 
@@ -65,8 +69,12 @@ func discover(ctx context.Context, opts DiscoverOptions) (*ServerInfo, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if probeServer(ctx, base, password) {
-			return &ServerInfo{BaseURL: base, Password: password}, nil
+		candidatePassword := password
+		if registered != nil && base == registered.BaseURL && candidatePassword == "" {
+			candidatePassword = registered.Password
+		}
+		if probeServer(ctx, base, candidatePassword) {
+			return &ServerInfo{BaseURL: base, Password: candidatePassword}, nil
 		}
 		failures = append(failures, base)
 	}
@@ -81,7 +89,7 @@ func probeServer(ctx context.Context, base, password string) bool {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	for _, path := range []string{"/global/health", "/config"} {
+	for _, path := range []string{"/api/info", "/global/health", "/config"} {
 		req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, strings.TrimSuffix(base, "/")+path, nil)
 		if err != nil {
 			return false
@@ -105,7 +113,12 @@ func probeServer(ctx context.Context, base, password string) bool {
 				return true
 			}
 			trimmed := bytes.TrimSpace(body)
-			return len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[')
+			if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+				return true
+			}
+			// V1 serves its HTML UI for unknown /api/info. Continue to its
+			// real health endpoint instead of treating that UI as offline.
+			continue
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return true // alive, just locked down
 		}

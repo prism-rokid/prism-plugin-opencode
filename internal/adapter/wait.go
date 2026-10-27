@@ -47,12 +47,37 @@ func (a *Adapter) WaitForRun(ctx context.Context, session pluginbridge.NativeSes
 				return nil
 			}
 			select {
-			case idle <- idleReason(props):
+			case idle <- terminalReason(ev.Type, props):
 			default:
 			}
 			return nil
 		})
 	}()
+	// V2 event subscriptions are live-only. A fast reply can finish between
+	// Send and WaitForRun; recover from its persisted user/idle boundary.
+	if recovery, ok := a.client.(interface {
+		RunOutcome(context.Context, string) (string, bool, error)
+	}); ok {
+		go func() {
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				reason, done, _ := recovery.RunOutcome(waitCtx, sessionID)
+				if done {
+					select {
+					case idle <- reason:
+					default:
+					}
+					return
+				}
+				select {
+				case <-waitCtx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
 
 	select {
 	case reason := <-idle:

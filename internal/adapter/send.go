@@ -29,6 +29,7 @@ const maxAttachmentBytes = 20 << 20
 // as opencode file parts using data URLs — the same form the opencode
 // clients use for images.
 func (a *Adapter) Send(ctx context.Context, session pluginbridge.NativeSession, msg pluginbridge.InboundMessage) (pluginbridge.SendReceipt, error) {
+	ctx = opencode.WithDirectory(ctx, session.Cwd)
 	sessionID := strings.TrimSpace(session.NativeSessionID)
 	if sessionID == "" {
 		return pluginbridge.SendReceipt{}, fmt.Errorf("opencode: native session id required")

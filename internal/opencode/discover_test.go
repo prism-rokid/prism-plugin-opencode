@@ -52,6 +52,8 @@ func isolatedDataDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "xdg"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
+	t.Setenv("OPENCODE_PASSWORD", "")
 	return dir
 }
 

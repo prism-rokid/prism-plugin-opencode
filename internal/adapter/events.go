@@ -71,7 +71,7 @@ func eventMessageID(props map[string]any) string {
 	if props == nil {
 		return ""
 	}
-	if id := propString(props, "messageID", "messageId"); id != "" {
+	if id := propString(props, "messageID", "messageId", "assistantMessageID"); id != "" {
 		return id
 	}
 	if message := eventMessageObject(props); message != nil {
@@ -120,6 +120,8 @@ func sessionStatusType(props map[string]any) string {
 // emitted by some builds and older traffic). Both count as terminal.
 func isSessionIdleEvent(ev opencode.Event, props map[string]any) bool {
 	switch ev.Type {
+	case "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted":
+		return true
 	case "session.idle":
 		return true
 	case "session.status":

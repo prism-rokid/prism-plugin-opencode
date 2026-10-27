@@ -118,7 +118,7 @@ func fakeServer(t *testing.T, handle func(w http.ResponseWriter, r *http.Request
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(handle))
 	t.Cleanup(srv.Close)
-	return srv, New(srv.URL, "")
+	return srv, newV1TestClient(srv.URL, "")
 }
 
 func writeJSON(w http.ResponseWriter, status int, body string) {
@@ -571,21 +571,21 @@ func TestBasicAuth(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	t.Run("no password rejected", func(t *testing.T) {
-		client := New(srv.URL, "")
+		client := newV1TestClient(srv.URL, "")
 		_, err := client.ListSessions(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "401") {
 			t.Fatalf("err = %v, want 401", err)
 		}
 	})
 	t.Run("wrong password rejected", func(t *testing.T) {
-		client := New(srv.URL, "wrong")
+		client := newV1TestClient(srv.URL, "wrong")
 		_, err := client.ListSessions(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "401") {
 			t.Fatalf("err = %v, want 401", err)
 		}
 	})
 	t.Run("user opencode + password accepted", func(t *testing.T) {
-		client := New(srv.URL, "s3cret")
+		client := newV1TestClient(srv.URL, "s3cret")
 		sessions, err := client.ListSessions(context.Background())
 		if err != nil || len(sessions) != 1 {
 			t.Fatalf("ListSessions = (%v, %v)", sessions, err)
@@ -602,7 +602,7 @@ func TestConnectionFailuresWrapErrServerOffline(t *testing.T) {
 	deadURL := "http://" + listener.Addr().String()
 	listener.Close()
 
-	client := New(deadURL, "")
+	client := newV1TestClient(deadURL, "")
 	_, err = client.ListSessions(context.Background())
 	if !errors.Is(err, ErrServerOffline) {
 		t.Fatalf("err = %v, want ErrServerOffline", err)
@@ -619,7 +619,7 @@ func TestContextCancellationPropagates(t *testing.T) {
 	t.Cleanup(srv.Close)
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(50*time.Millisecond, cancel)
-	client := New(srv.URL, "")
+	client := newV1TestClient(srv.URL, "")
 	_, err := client.GetSession(ctx, "ses_x")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)

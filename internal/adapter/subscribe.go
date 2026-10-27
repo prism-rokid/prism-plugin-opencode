@@ -73,6 +73,12 @@ func (a *Adapter) Subscribe(ctx context.Context, session pluginbridge.NativeSess
 // the event carries nothing the Hub consumes.
 func (a *Adapter) translateSessionEvent(ctx context.Context, sessionID, eventType string, props map[string]any) (pluginbridge.PluginEvent, bool) {
 	switch eventType {
+	case "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted":
+		return a.runTerminalEvent(ctx, sessionID, terminalReason(eventType, props), ""), true
+	case "session.text.delta", "session.text.ended", "session.step.started", "session.step.ended", "session.inbox.enqueued", "session.tool.called", "session.tool.success", "session.tool.failed":
+		return pluginbridge.PluginEvent{ID: sessionID + ":" + eventType, Type: "session.updated", Status: "running", Summary: "OpenCode 会话内容已更新。", Payload: map[string]any{"session_id": sessionID}, CreatedAt: time.Now().UTC()}, true
+	case "session.renamed", "session.model.selected":
+		return pluginbridge.PluginEvent{ID: sessionID + ":" + eventType, Type: "session.updated", Status: "idle", Summary: firstNonEmpty(propString(props, "title"), "OpenCode 会话已更新。"), Payload: map[string]any{"session_id": sessionID}, CreatedAt: time.Now().UTC()}, true
 	case "session.updated":
 		title := sessionEventTitle(props)
 		return pluginbridge.PluginEvent{
@@ -270,10 +276,16 @@ func (a *Adapter) runTerminalEvent(ctx context.Context, sessionID, reason, runID
 			reason = "aborted"
 		} else {
 			data, _ := failure["data"].(map[string]any)
-			summary = firstNonEmpty(propString(data, "message"), propString(failure, "name"), "opencode 运行失败。")
+			summary = firstNonEmpty(propString(data, "message"), propString(failure, "message"), propString(failure, "name", "type"), "opencode 运行失败。")
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "failed":
+		status = "failed"
+		eventType = "run.failed"
+		if len(failure) == 0 || summary == "" {
+			summary = "opencode 运行失败。"
+		}
 	case "aborted", "cancelled", "canceled", "interrupted":
 		status = "failed"
 		eventType = "run.failed"

@@ -66,7 +66,7 @@ func TestStreamEventsDelivery(t *testing.T) {
 	defer cancel()
 	events := make(chan Event, 8)
 	go func() {
-		_ = New(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
+		_ = newV1TestClient(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
 			events <- ev
 			return nil
 		})
@@ -106,7 +106,7 @@ func TestStreamEventsMultilineData(t *testing.T) {
 	defer cancel()
 	events := make(chan Event, 4)
 	go func() {
-		_ = New(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
+		_ = newV1TestClient(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
 			events <- ev
 			return nil
 		})
@@ -134,7 +134,7 @@ func TestStreamEventsContextCancelReturns(t *testing.T) {
 	var calls int32
 	streamDone := make(chan error, 1)
 	go func() {
-		streamDone <- New(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
+		streamDone <- newV1TestClient(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
 			atomic.AddInt32(&calls, 1)
 			events <- ev
 			cancel() // stop as soon as the first event arrives
@@ -166,7 +166,7 @@ func TestStreamEventsHandlerErrorStops(t *testing.T) {
 	sentinel := errors.New("stop from handler")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err := New(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
+	err := newV1TestClient(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
 		if ev.Type == "session.idle" {
 			return sentinel
 		}
@@ -204,7 +204,7 @@ func TestStreamEventsReconnectsAfterServerClose(t *testing.T) {
 	var delivered int32
 	streamDone := make(chan error, 1)
 	go func() {
-		streamDone <- New(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
+		streamDone <- newV1TestClient(srv.URL, "").StreamEvents(ctx, func(ev Event) error {
 			events <- ev
 			if atomic.AddInt32(&delivered, 1) == 3 {
 				cancel()
@@ -241,7 +241,7 @@ func TestStreamEventsRetriesThroughUnavailableServer(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	err := New(srv.URL, "").StreamEvents(ctx, func(Event) error { return nil })
+	err := newV1TestClient(srv.URL, "").StreamEvents(ctx, func(Event) error { return nil })
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("StreamEvents returned %v, want context.DeadlineExceeded", err)
 	}
@@ -267,7 +267,7 @@ func TestStreamEventsBasicAuth(t *testing.T) {
 	events := make(chan Event, 4)
 	streamDone := make(chan error, 1)
 	go func() {
-		streamDone <- New(srv.URL, "pw").StreamEvents(ctx, func(ev Event) error {
+		streamDone <- newV1TestClient(srv.URL, "pw").StreamEvents(ctx, func(ev Event) error {
 			events <- ev
 			cancel()
 			return nil

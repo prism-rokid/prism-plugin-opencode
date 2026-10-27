@@ -35,8 +35,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "opencode-adapter: %v\n", err)
 		os.Exit(1)
 	}
-	baseURL := resolveServerURL(*serverURL)
-	password := strings.TrimSpace(os.Getenv("OPENCODE_SERVER_PASSWORD"))
+	info := resolveServer(*serverURL)
+	baseURL, password := info.BaseURL, info.Password
 	server := &pluginbridge.StdioServer{
 		Adapter: adapter.New(adapter.Config{
 			Client:   opencode.New(baseURL, password),
@@ -54,17 +54,17 @@ func main() {
 // resolveServerURL resolves an explicit URL or discovers a running server
 // (explicit flag/env wins, then opencode.Discover, then the well-known
 // default port as a late-binding fallback).
-func resolveServerURL(flagged string) string {
+func resolveServer(flagged string) *opencode.ServerInfo {
 	url := strings.TrimSpace(flagged)
 	if url != "" && url != "auto" {
-		return strings.TrimRight(url, "/")
+		return &opencode.ServerInfo{BaseURL: strings.TrimRight(url, "/"), Password: opencode.ServerPassword()}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if info, err := opencode.Discover(ctx, opencode.DiscoverOptions{}); err == nil && info != nil && strings.TrimSpace(info.BaseURL) != "" {
-		return strings.TrimRight(strings.TrimSpace(info.BaseURL), "/")
+		return info
 	}
-	return defaultServerURL
+	return &opencode.ServerInfo{BaseURL: defaultServerURL, Password: opencode.ServerPassword()}
 }
 
 func envOr(key, fallback string) string {

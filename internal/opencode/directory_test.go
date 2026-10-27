@@ -39,7 +39,7 @@ func TestDirectoryScopedRequests(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(WithDirectory(context.Background(), directory), 2*time.Second)
 	defer cancel()
-	c := New(srv.URL, "")
+	c := newV1TestClient(srv.URL, "")
 	if _, err := c.GetConfig(ctx); err != nil {
 		t.Fatal(err)
 	}

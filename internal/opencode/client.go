@@ -2,19 +2,18 @@
 // server (default 127.0.0.1:4096, `opencode serve` or the one embedded in the
 // TUI/desktop app).
 //
-// The wire format follows opencode v1 (verified against opencode-ai 1.19.4's
-// OpenAPI spec served at GET /doc and live traffic): JSON keys are camelCase
-// (parentID, modelID, providerID), session times are epoch milliseconds under
-// time.created/time.updated, SSE events are `data: {"type": ...,
-// "properties": {...}}` frames on GET /event.
+// V1 (1.19.4) and V2 (2.2.0) are negotiated once per client. V2 wire formats
+// are normalized in v2.go; callers consume the same session/message structs.
 package opencode
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"sort"
+	"sync"
 )
 
 // ErrServerOffline is returned when no opencode server can be reached.
@@ -257,6 +256,26 @@ type ModelInfo struct {
 type Event struct {
 	Type       string          `json:"type"`
 	Properties json.RawMessage `json:"properties"`
+	Location   struct {
+		Directory string `json:"directory"`
+	} `json:"location"`
+}
+
+// V2 events carry their payload under data, rather than V1 properties.
+func (e *Event) UnmarshalJSON(raw []byte) error {
+	type wire Event
+	var w struct {
+		wire
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return err
+	}
+	*e = Event(w.wire)
+	if len(e.Properties) == 0 {
+		e.Properties = w.Data
+	}
+	return nil
 }
 
 // ServerInfo describes a discovered running opencode server.
@@ -267,9 +286,12 @@ type ServerInfo struct {
 
 // Client talks to one opencode server over HTTP.
 type Client struct {
-	baseURL  string
-	password string
-	http     httpClientState
+	baseURL       string
+	password      string
+	http          httpClientState
+	protocolMu    sync.Mutex
+	protocol      int               // 0: auto, 1: legacy, 2: V2
+	lastSubmitted map[string]string // V2 persisted user IDs, guarded by protocolMu
 }
 
 // New returns a Client for baseURL (e.g. http://127.0.0.1:4096); password may
@@ -283,17 +305,22 @@ func New(baseURL, password string) *Client {
 type DiscoverOptions struct {
 	ExplicitURL string // from flag/env, highest priority
 	DataDir     string // opencode data dir override ("" = default)
+	StateDir    string // V2 opencode state directory override
 }
 
-// Discover finds a running opencode server. It must check the explicit URL
-// first, then well-known ports (4096), then instance/port files under the
-// opencode data dir. Returns ErrServerOffline when nothing responds.
+// Discover checks an explicit URL, the registered V2 shared service, port
+// 4096, then legacy instance files. It never starts or stops a service.
 func Discover(ctx context.Context, opts DiscoverOptions) (*ServerInfo, error) {
 	return discover(ctx, opts)
 }
 
 // ListSessions lists sessions sorted newest-updated first.
 func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
+	if v2, err := c.isV2(ctx); err != nil {
+		return nil, err
+	} else if v2 {
+		return c.v2Sessions(ctx)
+	}
 	var sessions []Session
 	if err := c.doJSON(ctx, "GET", "/session", nil, nil, &sessions); err != nil {
 		return nil, err
@@ -306,6 +333,11 @@ func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 
 // GetSession fetches one session.
 func (c *Client) GetSession(ctx context.Context, id string) (*Session, error) {
+	if v2, err := c.isV2(ctx); err != nil {
+		return nil, err
+	} else if v2 {
+		return c.v2Session(ctx, id)
+	}
 	var session Session
 	if err := c.doJSON(ctx, "GET", "/session/"+url.PathEscape(id), nil, nil, &session); err != nil {
 		return nil, err
@@ -317,6 +349,11 @@ func (c *Client) GetSession(ctx context.Context, id string) (*Session, error) {
 // body; Directory (when set) is sent as the ?directory= query parameter, the
 // way the v1 server expects it.
 func (c *Client) CreateSession(ctx context.Context, req CreateSessionRequest) (*Session, error) {
+	if v2, err := c.isV2(ctx); err != nil {
+		return nil, err
+	} else if v2 {
+		return c.v2Create(ctx, req)
+	}
 	body := struct {
 		ParentID string    `json:"parentID,omitempty"`
 		Title    string    `json:"title,omitempty"`
@@ -335,6 +372,14 @@ func (c *Client) CreateSession(ctx context.Context, req CreateSessionRequest) (*
 
 // PatchSession renames a session.
 func (c *Client) PatchSession(ctx context.Context, id string, patch PatchSessionRequest) (*Session, error) {
+	if v2, err := c.isV2(ctx); err != nil {
+		return nil, err
+	} else if v2 {
+		if err := c.doJSON(ctx, "PATCH", v2SessionPath(id), nil, patch, nil); err != nil {
+			return nil, err
+		}
+		return c.v2Session(ctx, id)
+	}
 	var session Session
 	if err := c.doJSON(ctx, "PATCH", "/session/"+url.PathEscape(id), nil, patch, &session); err != nil {
 		return nil, err
@@ -348,12 +393,22 @@ func (c *Client) SwitchSessionModel(ctx context.Context, id string, model ModelR
 }
 
 func (c *Client) DeleteSession(ctx context.Context, id string) error {
+	if v2, err := c.isV2(ctx); err != nil {
+		return err
+	} else if v2 {
+		return c.doJSON(ctx, "DELETE", v2SessionPath(id), nil, nil, nil)
+	}
 	return c.doJSON(ctx, "DELETE", "/session/"+url.PathEscape(id), nil, nil, nil)
 }
 
 // ListMessages returns a session's messages in chronological order with
 // parts in original order.
 func (c *Client) ListMessages(ctx context.Context, sessionID string) ([]Message, error) {
+	if v2, err := c.isV2(ctx); err != nil {
+		return nil, err
+	} else if v2 {
+		return c.v2Messages(ctx, sessionID)
+	}
 	var messages []Message
 	if err := c.doJSON(ctx, "GET", "/session/"+url.PathEscape(sessionID)+"/message", nil, nil, &messages); err != nil {
 		return nil, err
@@ -381,17 +436,32 @@ func (c *Client) PromptWithParts(ctx context.Context, sessionID string, parts []
 	if len(parts) == 0 {
 		return errors.New("opencode: prompt requires at least one part")
 	}
+	if v2, err := c.isV2(ctx); err != nil {
+		return err
+	} else if v2 {
+		return c.v2Prompt(ctx, sessionID, parts)
+	}
 	body := promptAsyncRequest{Parts: parts}
 	return c.doJSON(ctx, "POST", "/session/"+url.PathEscape(sessionID)+"/prompt_async", nil, body, nil)
 }
 
 // Abort interrupts the active run (POST /session/:id/abort).
 func (c *Client) Abort(ctx context.Context, sessionID string) error {
+	if v2, err := c.isV2(ctx); err != nil {
+		return err
+	} else if v2 {
+		return c.doJSON(ctx, "POST", v2SessionPath(sessionID)+"/interrupt", nil, nil, nil)
+	}
 	return c.doJSON(ctx, "POST", "/session/"+url.PathEscape(sessionID)+"/abort", nil, nil, nil)
 }
 
 // GetConfig reads the merged config.
 func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
+	if v2, err := c.isV2(ctx); err != nil {
+		return nil, err
+	} else if v2 {
+		return c.v2Config(ctx)
+	}
 	var cfg Config
 	if err := c.doJSON(ctx, "GET", "/config", nil, nil, &cfg); err != nil {
 		return nil, err
@@ -401,6 +471,11 @@ func (c *Client) GetConfig(ctx context.Context) (*Config, error) {
 
 // PatchConfig updates config (model switch).
 func (c *Client) PatchConfig(ctx context.Context, patch PatchConfigRequest) (*Config, error) {
+	if v2, err := c.isV2(ctx); err != nil {
+		return nil, err
+	} else if v2 {
+		return nil, fmt.Errorf("opencode: V2 global config mutation is not supported; switch the session model instead")
+	}
 	var cfg Config
 	if err := c.doJSON(ctx, "PATCH", "/config", nil, patch, &cfg); err != nil {
 		return nil, err
@@ -411,6 +486,11 @@ func (c *Client) PatchConfig(ctx context.Context, patch PatchConfigRequest) (*Co
 // ListAgents returns agent definitions (GET /agent), hiding the internal
 // agents the server marks "hidden" (title/summary/compaction machinery).
 func (c *Client) ListAgents(ctx context.Context) ([]Agent, error) {
+	if v2, err := c.isV2(ctx); err != nil {
+		return nil, err
+	} else if v2 {
+		return c.v2Agents(ctx)
+	}
 	var wire []struct {
 		Name        string `json:"name"`
 		Mode        string `json:"mode"`
@@ -433,6 +513,11 @@ func (c *Client) ListAgents(ctx context.Context) ([]Agent, error) {
 // ListModels returns models advertised by configured providers
 // (GET /config/providers).
 func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	if v2, err := c.isV2(ctx); err != nil {
+		return nil, err
+	} else if v2 {
+		return c.v2Models(ctx)
+	}
 	var wire struct {
 		Providers []struct {
 			ID     string `json:"id"`
