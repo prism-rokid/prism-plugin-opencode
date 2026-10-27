@@ -61,7 +61,11 @@ func resolveServer(flagged string) *opencode.ServerInfo {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if info, err := opencode.Discover(ctx, opencode.DiscoverOptions{}); err == nil && info != nil && strings.TrimSpace(info.BaseURL) != "" {
+	options := opencode.DiscoverOptions{
+		DataDir:  strings.TrimSpace(os.Getenv("PRISM_OPENCODE_DATA_DIR")),
+		StateDir: strings.TrimSpace(os.Getenv("PRISM_OPENCODE_STATE_DIR")),
+	}
+	if info, err := opencode.Discover(ctx, options); err == nil && info != nil && strings.TrimSpace(info.BaseURL) != "" {
 		return info
 	}
 	return &opencode.ServerInfo{BaseURL: defaultServerURL, Password: opencode.ServerPassword()}

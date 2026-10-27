@@ -26,6 +26,10 @@ opencode server   （`opencode serve --port 4096`，或 TUI/桌面内嵌的随�
   `opencode serve --port 4096`（`ready: probe`）。
 - 详细分工与 API 事实见 [docs/CONTRACT.md](docs/CONTRACT.md)。
 
+Windows 目录兜底：服务地址可以用 `PRISM_OPENCODE_SERVER_URL` 明确指定；
+自动发现时可用 `PRISM_OPENCODE_STATE_DIR` 指向含 `service.json` 的目录，
+用 `PRISM_OPENCODE_DATA_DIR` 指向实例文件目录。目录不可用时仍尝试本机 4096 端口。
+
 ## 仓库布局
 
 | 路径 | 说明 |

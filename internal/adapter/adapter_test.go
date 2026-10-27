@@ -19,12 +19,12 @@ func TestProbeOfflineReportsReason(t *testing.T) {
 		{
 			name:       "server offline sentinel",
 			listErr:    opencode.ErrServerOffline,
-			wantReason: "opencode server offline",
+			wantReason: "OpenCode 服务未连接",
 		},
 		{
 			name:       "generic transport failure",
 			listErr:    errors.New("connection refused"),
-			wantReason: "connection refused",
+			wantReason: "请检查服务地址和访问凭据",
 		},
 	}
 	for _, tt := range tests {
@@ -130,7 +130,7 @@ func TestDiscoverOfflineIsUnverifiedNotError(t *testing.T) {
 	if result.Verified {
 		t.Fatalf("expected Verified=false")
 	}
-	if !strings.Contains(result.Detail, "offline") {
+	if !strings.Contains(result.Detail, "服务未连接") {
 		t.Fatalf("Detail = %q, want offline reason", result.Detail)
 	}
 	if len(result.SessionHints) != 0 {

@@ -163,9 +163,9 @@ func (a *Adapter) probeServer(ctx context.Context) (bool, string) {
 	defer cancel()
 	if _, err := a.client.ListSessions(probeCtx); err != nil {
 		if errors.Is(err, opencode.ErrServerOffline) {
-			return false, fmt.Sprintf("opencode server offline: no server reachable at %s", a.endpoint)
+			return false, fmt.Sprintf("OpenCode 服务未连接；请启动服务或检查地址 %s。", a.endpoint)
 		}
-		return false, err.Error()
+		return false, "OpenCode 服务连接失败；请检查服务地址和访问凭据。"
 	}
 	return true, ""
 }
@@ -184,9 +184,9 @@ func (a *Adapter) Discover(ctx context.Context) (pluginbridge.DiscoveryResult, e
 	sessions, err := a.client.ListSessions(probeCtx)
 	if err != nil {
 		if errors.Is(err, opencode.ErrServerOffline) {
-			result.Detail = fmt.Sprintf("opencode server offline: no server reachable at %s", a.endpoint)
+			result.Detail = fmt.Sprintf("OpenCode 服务未连接；请启动服务或检查地址 %s。", a.endpoint)
 		} else {
-			result.Detail = "opencode server unreachable: " + err.Error()
+			result.Detail = "OpenCode 服务连接失败；请检查服务地址和访问凭据。"
 		}
 		return result, nil
 	}
