@@ -4,7 +4,7 @@ display_name: OpenCode
 icon_url: https://registry.npmmirror.com/@lobehub/icons-static-avatar/latest/files/avatars/opencode.webp
 icon_svg_url: https://registry.npmmirror.com/@lobehub/icons-static-svg/latest/files/icons/opencode.svg
 description: Connects Prism to a locally running opencode server (opencode serve, or the server embedded in the opencode TUI/desktop app) over its native HTTP + SSE protocol, with session listing, history reads, prompt delivery, interrupt, and model control.
-version: 0.1.2
+version: 0.1.3
 plugin_protocol_version: "4"
 min_hub_version: 0.1.0
 integration_mode: protocol-native

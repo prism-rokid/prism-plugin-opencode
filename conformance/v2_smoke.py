@@ -11,6 +11,7 @@ ap.add_argument('--server-url',required=True)
 ap.add_argument('--cwd',required=True)
 ap.add_argument('--model',required=True)
 ap.add_argument('--expected',default='PRISM_V2_OK')
+ap.add_argument('--vision-check',action='store_true',help='Require the real model to identify the generated image color; do not use with the fixed-response mock')
 ap.add_argument('--adapter',default=str(pathlib.Path(__file__).resolve().parents[1]/'bin/prism-plugin-opencode'))
 args=ap.parse_args()
 password=os.environ.get('OPENCODE_PASSWORD',os.environ.get('OPENCODE_SERVER_PASSWORD',''))
@@ -43,6 +44,8 @@ def history(session,stream):
  rpc('readHistoryStream',{'session':session,'request':{'stream_id':stream,'limit':20}})
  wait(lambda:any(f.get('event')=='history.stream' and f['payload'].get('stream_id')==stream and f['payload'].get('type')=='end' for f in frames),stream)
  return [m for f in frames if f.get('event')=='history.stream' and f['payload'].get('stream_id')==stream and f['payload'].get('turn') for m in f['payload']['turn']['messages']]
+def image_answer_matches(text):
+ return ('red' in text.lower() or '红' in text) if args.vision_check else args.expected in text
 try:
  assert rpc('probe')['available'];assert rpc('discover')['verified']
  draft=rpc('openDraft',{'draft_id':'v2-smoke-'+str(time.time_ns()),'cwd':args.cwd})
@@ -64,13 +67,17 @@ try:
  png=pathlib.Path(args.cwd)/'prism-v2-smoke.png'
  def chunk(kind,data):return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data)&0xffffffff)
  png.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',16,16,8,2,0,0,0))+chunk(b'IDAT',zlib.compress((b'\x00'+b'\xff\x00\x00'*16)*16))+chunk(b'IEND',b''))
- assert rpc('send',{'session':session,'message':{'prism_message_id':'v2-image','text':'Reply exactly '+args.expected+'.','attachments':[{'name':png.name,'mime_type':'image/png','local_path':str(png)}]}})['accepted']
+ image_prompt='What is the dominant color of the attached image? Answer briefly based on the image only. Do not use tools.' if args.vision_check else 'Reply exactly '+args.expected+'.'
+ assert rpc('send',{'session':session,'message':{'prism_message_id':'v2-image','text':image_prompt,'attachments':[{'name':png.name,'mime_type':'image/png','local_path':str(png)}]}})['accepted']
  end=rpc('waitForRun',{'session':session,'run_id':'v2-image'});assert end['type']=='run.completed',end
+ if args.vision_check:
+  assert image_answer_matches(end['summary']),('Image was admitted but real visual recognition failed',end)
+  print('PASS real visual recognition: red image',flush=True)
  messages=history(session,'v2-final')
  assert any(m['role']=='assistant' and args.expected in m.get('content','') for m in messages),messages
  assert any(m.get('metadata',{}).get('attachments') for m in messages if m['role']=='user'),messages
- wait(lambda:any(f.get('event')=='plugin.event' and f['payload']['event']['type']=='message.part.updated' and args.expected in f['payload']['event'].get('payload',{}).get('text','') for f in frames),'streamed text')
- assert any(f.get('event')=='history.stream' and f['payload'].get('source')=='live' and f['payload'].get('turn') and any(args.expected in m.get('content','') for m in f['payload']['turn']['messages']) for f in frames),'missing live history'
+ wait(lambda:any(f.get('event')=='plugin.event' and f['payload']['event']['type']=='message.part.updated' and image_answer_matches(f['payload']['event'].get('payload',{}).get('text','')) for f in frames),'streamed text')
+ assert any(f.get('event')=='history.stream' and f['payload'].get('source')=='live' and f['payload'].get('turn') and any(image_answer_matches(m.get('content','')) for m in f['payload']['turn']['messages']) for f in frames),'missing live history'
  # Interrupt the next execution before its provider responds.
  offset=len(frames)
  rpc('send',{'session':session,'message':{'prism_message_id':'v2-interrupt','text':'Reply after a long delay.'}})
