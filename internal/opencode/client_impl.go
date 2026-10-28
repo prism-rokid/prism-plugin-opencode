@@ -49,7 +49,8 @@ func (s *httpClientState) get() *http.Client {
 
 // endpoint joins the client base URL with an absolute path.
 func (c *Client) endpoint(path string) string {
-	return strings.TrimSuffix(c.baseURL, "/") + path
+	base, _ := c.connection()
+	return strings.TrimSuffix(base, "/") + path
 }
 
 // doJSON performs one JSON request. A nil respOut only checks the status
@@ -65,7 +66,8 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		}
 		body = bytes.NewReader(encoded)
 	}
-	endpoint := c.endpoint(path)
+	base, password := c.connection()
+	endpoint := strings.TrimSuffix(base, "/") + path
 	if directory := directoryFromContext(ctx); directory != "" && !strings.HasPrefix(path, "/api/") && query.Get("directory") == "" {
 		scoped := make(url.Values, len(query)+1)
 		for key, values := range query {
@@ -93,8 +95,8 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.password != "" {
-		req.SetBasicAuth(basicAuthUsername, c.password)
+	if password != "" {
+		req.SetBasicAuth(basicAuthUsername, password)
 	}
 
 	resp, err := c.http.get().Do(req)
@@ -102,6 +104,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("opencode: %s %s: %w", method, path, ctxErr)
 		}
+		c.rediscover(ctx)
 		return fmt.Errorf("%w: %s %s: %v", ErrServerOffline, method, path, err)
 	}
 	defer resp.Body.Close()
@@ -166,7 +169,8 @@ func (c *Client) connectSSE(ctx context.Context) (*http.Response, error) {
 	if v2 {
 		path = "/api/event"
 	}
-	endpoint := c.endpoint(path)
+	base, password := c.connection()
+	endpoint := strings.TrimSuffix(base, "/") + path
 	if directory := directoryFromContext(ctx); directory != "" && !v2 {
 		endpoint += "?" + url.Values{"directory": {directory}}.Encode()
 	}
@@ -176,8 +180,8 @@ func (c *Client) connectSSE(ctx context.Context) (*http.Response, error) {
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
-	if c.password != "" {
-		req.SetBasicAuth(basicAuthUsername, c.password)
+	if password != "" {
+		req.SetBasicAuth(basicAuthUsername, password)
 	}
 	resp, err := c.http.get().Do(req)
 	if err != nil {

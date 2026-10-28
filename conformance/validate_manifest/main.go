@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -56,7 +57,7 @@ func main() {
 
 	var manifestBytes []byte
 	if *manifestPath == "-" {
-		manifestBytes, err = os.ReadFile("/dev/stdin")
+		manifestBytes, err = io.ReadAll(os.Stdin)
 	} else {
 		manifestBytes, err = os.ReadFile(*manifestPath)
 	}

@@ -286,8 +286,10 @@ type ServerInfo struct {
 
 // Client talks to one opencode server over HTTP.
 type Client struct {
+	endpointMu    sync.RWMutex
 	baseURL       string
 	password      string
+	discovery     *DiscoverOptions
 	http          httpClientState
 	protocolMu    sync.Mutex
 	protocol      int               // 0: auto, 1: legacy, 2: V2
@@ -298,6 +300,14 @@ type Client struct {
 // be empty for no-auth local servers.
 func New(baseURL, password string) *Client {
 	return &Client{baseURL: baseURL, password: password}
+}
+
+// EnableRediscovery permits changing an automatically discovered endpoint after failure.
+// Explicit endpoints must not enable it.
+func (c *Client) EnableRediscovery(opts DiscoverOptions) {
+	c.endpointMu.Lock()
+	defer c.endpointMu.Unlock()
+	c.discovery = &opts
 }
 
 // DiscoverOptions controls server discovery: explicit URL/port, and where to

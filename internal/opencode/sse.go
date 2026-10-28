@@ -39,6 +39,7 @@ func (c *Client) streamEvents(ctx context.Context, fn func(Event) error) error {
 			if isContextError(ctx, err) {
 				return ctx.Err()
 			}
+			c.rediscover(ctx)
 			if wakeErr := sleepCtx(ctx, backoff); wakeErr != nil {
 				return wakeErr
 			}

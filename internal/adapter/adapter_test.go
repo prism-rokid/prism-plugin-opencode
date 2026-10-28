@@ -10,6 +10,24 @@ import (
 	pluginbridge "github.com/Rokid-Prism/prism-plugin-sdk"
 )
 
+type protocolClient struct {
+	*mockClient
+	v2 bool
+}
+
+func (c *protocolClient) IsV2(context.Context) (bool, error) { return c.v2, nil }
+
+func TestProbeChoosesEventScopeByProtocol(t *testing.T) {
+	for _, v2 := range []bool{false, true} {
+		client := &protocolClient{mockClient: &mockClient{listSessions: func(context.Context) ([]opencode.Session, error) { return nil, nil }}, v2: v2}
+		a := New(Config{Client: client})
+		capability, err := a.Probe(context.Background())
+		if err != nil || capability.CanPluginWideWatch != v2 {
+			t.Fatalf("v2=%v, capability=%+v, error=%v", v2, capability, err)
+		}
+	}
+}
+
 func TestProbeOfflineReportsReason(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -80,7 +98,7 @@ func TestProbeOnlineDeclaresExactlyImplementedCapabilities(t *testing.T) {
 			t.Errorf("capability %s should be declared", name)
 		}
 	}
-	// Not implemented: no ApprovalResolver, no PluginWideSubscriber, no
+	// Not implemented: no ApprovalResolver, no
 	// StatusReader, no draft/terminal support.
 	if capability.CanApproval || capability.CanPluginWideWatch || capability.CanReadStatus ||
 		capability.CanOpenManagedTerminal {

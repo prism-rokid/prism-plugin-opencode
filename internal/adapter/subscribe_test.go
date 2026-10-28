@@ -14,6 +14,41 @@ import (
 
 const subscribeSession = "ses_1"
 
+func TestPluginWideWatcherDiscoversNativeSession(t *testing.T) {
+	client := &mockClient{
+		getSession: func(_ context.Context, id string) (*opencode.Session, error) {
+			return &opencode.Session{ID: id, Title: "Native CLI session", Directory: "/project"}, nil
+		},
+		streamEvents: func(ctx context.Context, fn func(opencode.Event) error) error {
+			if err := fn(eventWithProps(t, "session.created", map[string]any{"sessionID": "ses_new"})); err != nil {
+				return err
+			}
+			return fn(eventWithProps(t, "session.created", map[string]any{"info": map[string]any{"id": "ses_legacy"}}))
+		},
+	}
+	a := New(Config{Client: client, Endpoint: "http://localhost:4096"})
+	events, err := a.SubscribePlugin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, ok := <-events
+	if !ok {
+		t.Fatal("native creation was not published")
+	}
+	native, ok := event.Payload["native_session"].(map[string]any)
+	if !ok || native["native_session_id"] != "ses_new" || native["cwd"] != "/project" {
+		t.Fatalf("incorrect native identity: %#v", event.Payload)
+	}
+	hint, ok := event.Payload["session_hint"].(map[string]any)
+	if !ok || hint["title"] != "Native CLI session" {
+		t.Fatalf("missing session index hint: %#v", event.Payload)
+	}
+	legacy, ok := <-events
+	if !ok || legacy.Payload["native_session"].(map[string]any)["native_session_id"] != "ses_legacy" {
+		t.Fatalf("legacy session.created identity not discovered: %#v", legacy.Payload)
+	}
+}
+
 // TestSubscribeTranslatesNativeEvents is the table-driven SSE->PluginEvent
 // contract: each native event yields the listed PluginEvent (or none).
 func TestSubscribeTranslatesNativeEvents(t *testing.T) {

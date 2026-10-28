@@ -69,6 +69,67 @@ func (a *Adapter) Subscribe(ctx context.Context, session pluginbridge.NativeSess
 	return out, nil
 }
 
+// SubscribePlugin watches the shared server stream so sessions created by a
+// native CLI after Hub startup can be discovered without restarting Hub.
+func (a *Adapter) SubscribePlugin(ctx context.Context) (<-chan pluginbridge.PluginEvent, error) {
+	out := make(chan pluginbridge.PluginEvent, 64)
+	go func() {
+		defer close(out)
+		known := map[string]opencode.Session{}
+		_ = a.client.StreamEvents(ctx, func(ev opencode.Event) error {
+			props := eventProperties(ev)
+			id := eventSessionID(props)
+			if id == "" && strings.HasPrefix(ev.Type, "session.") {
+				if info, ok := props["info"].(map[string]any); ok {
+					id = propString(info, "id", "sessionID")
+				}
+			}
+			if id == "" {
+				return nil
+			}
+			created := ev.Type == "session.created"
+			translated, ok := a.translateSessionEvent(ctx, id, ev.Type, props)
+			if created {
+				translated = pluginbridge.PluginEvent{ID: id + ":created", Type: "session.updated", Status: "idle", CreatedAt: time.Now().UTC(), Payload: map[string]any{"session_id": id}}
+				ok = true
+			}
+			if !ok {
+				return nil
+			}
+			row, exists := known[id]
+			if !exists || created || ev.Type == "session.renamed" || ev.Type == "session.updated" {
+				if fresh, err := a.client.GetSession(ctx, id); err == nil && fresh != nil {
+					row = *fresh
+					if len(known) >= 1024 {
+						clear(known)
+					}
+					known[id] = row
+				} else if !exists {
+					return nil
+				}
+			}
+			if translated.Payload == nil {
+				translated.Payload = map[string]any{}
+			}
+			identity := map[string]any{"plugin_id": a.ID(), "native_session_id": id, "surface": Surface, "endpoint": a.endpoint, "cwd": row.Directory}
+			translated.Payload["native_session"] = identity
+			if created || ev.Type == "session.renamed" || ev.Type == "session.updated" || ev.Type == "session.deleted" || strings.HasPrefix(translated.Type, "run.") {
+				hint := map[string]any{"plugin_id": a.ID(), "native_session_id": id, "surface": Surface, "endpoint": a.endpoint, "cwd": row.Directory, "title": row.Title, "last_activity_at": time.Now().UTC().Format(time.RFC3339Nano)}
+				if ev.Type == "session.deleted" {
+					hint["change"] = "deleted"
+					delete(known, id)
+				}
+				translated.Payload["session_hint"] = hint
+			}
+			if !sendPluginEvent(ctx, out, translated) {
+				return ctx.Err()
+			}
+			return nil
+		})
+	}()
+	return out, nil
+}
+
 // translateSessionEvent converts one attributed native event. ok=false means
 // the event carries nothing the Hub consumes.
 func (a *Adapter) translateSessionEvent(ctx context.Context, sessionID, eventType string, props map[string]any) (pluginbridge.PluginEvent, bool) {

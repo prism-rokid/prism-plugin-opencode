@@ -15,6 +15,16 @@ func ServerPassword() string {
 	return os.Getenv("OPENCODE_SERVER_PASSWORD")
 }
 
+// RegisteredPasswordForURL supplies a V2 service credential only for the
+// exact registered loopback URL. Never send it to a different explicit host.
+func RegisteredPasswordForURL(rawURL, stateDir string) string {
+	registered := registeredService(stateDir)
+	if registered == nil || strings.TrimRight(strings.TrimSpace(rawURL), "/") != registered.BaseURL {
+		return ""
+	}
+	return registered.Password
+}
+
 func registeredService(stateDir string) *ServerInfo {
 	if stateDir == "" {
 		root := os.Getenv("XDG_STATE_HOME")

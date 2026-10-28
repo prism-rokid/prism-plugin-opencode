@@ -14,6 +14,14 @@ import (
 )
 
 func (c *Client) isV2(ctx context.Context) (bool, error) {
+	v2, err := c.detectProtocol(ctx)
+	if err != nil && ctx.Err() == nil && c.rediscover(ctx) {
+		return c.detectProtocol(ctx)
+	}
+	return v2, err
+}
+
+func (c *Client) detectProtocol(ctx context.Context) (bool, error) {
 	c.protocolMu.Lock()
 	defer c.protocolMu.Unlock()
 	if c.protocol != 0 {
@@ -21,13 +29,14 @@ func (c *Client) isV2(ctx context.Context) (bool, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", c.endpoint("/api/info"), nil)
+	base, password := c.connection()
+	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimSuffix(base, "/")+"/api/info", nil)
 	if err != nil {
 		return false, err
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.password != "" {
-		req.SetBasicAuth(basicAuthUsername, c.password)
+	if password != "" {
+		req.SetBasicAuth(basicAuthUsername, password)
 	}
 	resp, err := c.http.get().Do(req)
 	if err != nil {
@@ -65,6 +74,10 @@ func (c *Client) isV2(ctx context.Context) (bool, error) {
 	}
 	return false, fmt.Errorf("opencode: unsupported server version %q", info.Version)
 }
+
+// IsV2 reports the negotiated protocol so callers can choose the correct
+// event subscription scope; legacy /event may be scoped to a project.
+func (c *Client) IsV2(ctx context.Context) (bool, error) { return c.isV2(ctx) }
 
 func v2SessionPath(id string) string { return "/api/session/" + url.PathEscape(id) }
 

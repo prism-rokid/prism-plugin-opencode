@@ -37,9 +37,13 @@ func main() {
 	}
 	info := resolveServer(*serverURL)
 	baseURL, password := info.BaseURL, info.Password
+	client := opencode.New(baseURL, password)
+	if strings.TrimSpace(*serverURL) == "" || strings.TrimSpace(*serverURL) == "auto" {
+		client.EnableRediscovery(opencode.DiscoverOptions{DataDir: strings.TrimSpace(os.Getenv("PRISM_OPENCODE_DATA_DIR")), StateDir: strings.TrimSpace(os.Getenv("PRISM_OPENCODE_STATE_DIR"))})
+	}
 	server := &pluginbridge.StdioServer{
 		Adapter: adapter.New(adapter.Config{
-			Client:   opencode.New(baseURL, password),
+			Client:   client,
 			Endpoint: baseURL,
 		}),
 		In:  os.Stdin,
@@ -57,7 +61,11 @@ func main() {
 func resolveServer(flagged string) *opencode.ServerInfo {
 	url := strings.TrimSpace(flagged)
 	if url != "" && url != "auto" {
-		return &opencode.ServerInfo{BaseURL: strings.TrimRight(url, "/"), Password: opencode.ServerPassword()}
+		password := opencode.ServerPassword()
+		if password == "" {
+			password = opencode.RegisteredPasswordForURL(url, strings.TrimSpace(os.Getenv("PRISM_OPENCODE_STATE_DIR")))
+		}
+		return &opencode.ServerInfo{BaseURL: strings.TrimRight(url, "/"), Password: password}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

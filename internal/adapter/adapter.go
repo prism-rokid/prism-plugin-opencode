@@ -127,11 +127,18 @@ func (a *Adapter) ID() string { return "opencode" }
 
 // Probe reports the adapter capability. Declared capabilities are kept
 // strictly in sync with the interfaces implemented above: model switching is
-// implemented (CanControlSession), permission.asked events are surfaced as
-// approval panels but cannot be resolved remotely (CanApproval false), and
-// there is no plugin-wide watcher, status reader or terminal support.
+// implemented (CanControlSession), permission events cannot be resolved
+// remotely, and the plugin-wide watcher is available for V2 only.
 func (a *Adapter) Probe(ctx context.Context) (pluginbridge.Capability, error) {
 	available, reason := a.probeServer(ctx)
+	pluginWide := false
+	if available {
+		if detector, ok := a.client.(interface {
+			IsV2(context.Context) (bool, error)
+		}); ok {
+			pluginWide, _ = detector.IsV2(ctx)
+		}
+	}
 	capability := pluginbridge.Capability{
 		PluginID:                   a.ID(),
 		Available:                  available,
@@ -146,7 +153,7 @@ func (a *Adapter) Probe(ctx context.Context) (pluginbridge.Capability, error) {
 		CanApproval:                false,
 		CanForwardSync:             available,
 		CanReverseSync:             true,
-		CanPluginWideWatch:         false,
+		CanPluginWideWatch:         pluginWide,
 		CanWaitRun:                 true,
 		CanReadStatus:              false,
 		CanControlSession:          true,
