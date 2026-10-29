@@ -1,7 +1,7 @@
 {
   "id": "opencode",
   "name": "prism-plugin-opencode",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "license": "MIT",
   "engines": {
