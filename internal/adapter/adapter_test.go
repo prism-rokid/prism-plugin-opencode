@@ -33,16 +33,19 @@ func TestProbeOfflineReportsReason(t *testing.T) {
 		name       string
 		listErr    error
 		wantReason string
+		wantCode   string
 	}{
 		{
 			name:       "server offline sentinel",
 			listErr:    opencode.ErrServerOffline,
 			wantReason: "OpenCode 服务未连接",
+			wantCode:   "control_channel_unreachable",
 		},
 		{
 			name:       "generic transport failure",
 			listErr:    errors.New("connection refused"),
 			wantReason: "请检查服务地址和访问凭据",
+			wantCode:   "service_request_failed",
 		},
 	}
 	for _, tt := range tests {
@@ -59,6 +62,9 @@ func TestProbeOfflineReportsReason(t *testing.T) {
 			}
 			if !strings.Contains(capability.UnavailableReason, tt.wantReason) {
 				t.Fatalf("UnavailableReason = %q, want substring %q", capability.UnavailableReason, tt.wantReason)
+			}
+			if diagnostic := capability.Diagnostics; diagnostic == nil || diagnostic.Code != tt.wantCode {
+				t.Fatalf("意外的诊断结果 %#v", diagnostic)
 			}
 			if capability.NativeVisibleInput || capability.NativeVisibleOutput || capability.CanForwardSync {
 				t.Fatalf("offline probe must not claim visibility or forward sync: %+v", capability)
@@ -77,6 +83,9 @@ func TestProbeOnlineDeclaresExactlyImplementedCapabilities(t *testing.T) {
 	}
 	if !capability.Available {
 		t.Fatalf("expected Available=true, reason %q", capability.UnavailableReason)
+	}
+	if diagnostic := capability.Diagnostics; diagnostic == nil || diagnostic.Code != "ready" || diagnostic.Facts["transport_reachable"] != true {
+		t.Fatalf("意外的诊断结果 %#v", diagnostic)
 	}
 	if !capability.NativeVisibleInput || !capability.NativeVisibleOutput || !capability.CanForwardSync {
 		t.Fatalf("online probe should claim visibility + forward sync: %+v", capability)

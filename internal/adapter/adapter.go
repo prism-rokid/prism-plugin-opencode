@@ -130,7 +130,7 @@ func (a *Adapter) ID() string { return "opencode" }
 // implemented (CanControlSession), permission events cannot be resolved
 // remotely, and the plugin-wide watcher is available for V2 only.
 func (a *Adapter) Probe(ctx context.Context) (pluginbridge.Capability, error) {
-	available, reason := a.probeServer(ctx)
+	available, reason, diagnostics := a.probeServer(ctx)
 	pluginWide := false
 	if available {
 		if detector, ok := a.client.(interface {
@@ -160,21 +160,38 @@ func (a *Adapter) Probe(ctx context.Context) (pluginbridge.Capability, error) {
 		IntegrationMode:            pluginbridge.IntegrationModeProtocolNative,
 		VisibilitySurface:          Surface,
 		UnavailableReason:          reason,
+		Diagnostics:                diagnostics,
 	}
 	return capability, nil
 }
 
 // probeServer performs one live liveness check against the injected client.
-func (a *Adapter) probeServer(ctx context.Context) (bool, string) {
+func (a *Adapter) probeServer(ctx context.Context) (bool, string, *pluginbridge.Diagnostic) {
 	probeCtx, cancel := context.WithTimeout(ctx, a.probeTimeout)
 	defer cancel()
-	if _, err := a.client.ListSessions(probeCtx); err != nil {
-		if errors.Is(err, opencode.ErrServerOffline) {
-			return false, fmt.Sprintf("OpenCode 服务未连接；请启动服务或检查地址 %s。", a.endpoint)
-		}
-		return false, "OpenCode 服务连接失败；请检查服务地址和访问凭据。"
+	diagnostics := &pluginbridge.Diagnostic{
+		Component: "OpenCode 服务", Facts: map[string]any{"transport": "http", "transport_reachable": false},
 	}
-	return true, ""
+	if _, err := a.client.ListSessions(probeCtx); err != nil {
+		diagnostics.State = "unavailable"
+		diagnostics.Actions = []string{"recheck"}
+		if errors.Is(err, opencode.ErrServerOffline) {
+			diagnostics.Code = "control_channel_unreachable"
+			diagnostics.Summary = "OpenCode 服务未连接"
+			diagnostics.Actions = []string{"managed_relaunch", "recheck"}
+			return false, "OpenCode 服务未连接；请启动服务或检查地址。", diagnostics
+		}
+		delete(diagnostics.Facts, "transport_reachable")
+		diagnostics.Code = "service_request_failed"
+		diagnostics.Summary = "OpenCode 服务检查失败"
+		diagnostics.Detail = "会话列表请求失败，请检查服务地址、访问凭据和服务版本。"
+		return false, "OpenCode 服务连接失败；请检查服务地址和访问凭据。", diagnostics
+	}
+	diagnostics.State = "ready"
+	diagnostics.Code = "ready"
+	diagnostics.Summary = "OpenCode 已连接"
+	diagnostics.Facts["transport_reachable"] = true
+	return true, "", diagnostics
 }
 
 // Discover reports the server endpoint and the current native session
